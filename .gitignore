@@ -1,1 +1,7 @@
 *.pth
+gpt2/
+*.pth
+*.ckpt*
+*.data*
+*.index
+checkpoint

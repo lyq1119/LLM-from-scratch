@@ -207,48 +207,53 @@ class GPTModel(nn.Module):
         return logits
 
 
-def generate_text_simple(model, idx, max_new_tokens, context_size):
-    # idx is (B, T) array of indices in the current context
+def generate_text_simple(model, tokenizer,idx, max_new_tokens, context_size,device,temperature=0,topk=None):
+    model.eval()
+    idx = idx.to(device)
     for _ in range(max_new_tokens):
-
-        # Crop current context if it exceeds the supported context size
-        # E.g., if LLM supports only 5 tokens, and the context size is 10
-        # then only the last 5 tokens are used as context
         idx_cond = idx[:, -context_size:]
-
-        # Get the predictions
         with torch.no_grad():
             logits = model(idx_cond)
-
-        # Focus only on the last time step
-        # (batch, n_token, vocab_size) becomes (batch, vocab_size)
-        logits = logits[:, -1, :]
-
-        # Get the idx of the vocab entry with the highest logits value
-        idx_next = torch.argmax(logits, dim=-1, keepdim=True)  # (batch, 1)
-
-        # Append sampled index to the running sequence
-        idx = torch.cat((idx, idx_next), dim=1)  # (batch, n_tokens+1)
-
+        logit = logits[:,-1, :]
+        if topk:
+            top_logits,_ = torch.topk(logit,topk)
+            min_val = top_logits[:,-1]
+            logit = torch.where(
+                condition=logit<min_val,
+                input=torch.tensor(float("-inf")).to(logit.device),
+                other=logit
+                )
+        if temperature == 0:
+            idx_next = torch.argmax(torch.softmax(logit,dim=-1),dim=-1,keepdim=True)
+        else:
+            idx_next = torch.multinomial(torch.softmax(logit/temperature,dim=-1) ,num_samples=1)
+        idx = torch.cat((idx, idx_next), dim=1) 
     return idx
 
 
 def main():
     GPT_CONFIG_124M = {
         "vocab_size": 50257,     # Vocabulary size
-        "context_length": 1024,  # Context length
+        "context_length": 256,  # Context length
         "emb_dim": 768,          # Embedding dimension
         "n_heads": 12,           # Number of attention heads
         "n_layers": 12,          # Number of layers
         "drop_rate": 0.1,        # Dropout rate
         "qkv_bias": False        # Query-Key-Value bias
     }
-
-    torch.manual_seed(123)
+    device = torch.device("mps")
     model = GPTModel(GPT_CONFIG_124M)
+    model.to(device)
+    checkpoint = torch.load("model_and_optimizer.pth", weights_only=True)
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0005, weight_decay=0.1)
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
     model.eval()  # disable dropout
 
-    start_context = "Hello, I am Lan Yuqi."
+    start_context = "Every effort moves you"
 
     tokenizer = tiktoken.get_encoding("gpt2")
     encoded = tokenizer.encode(start_context)
@@ -261,16 +266,20 @@ def main():
 
     out = generate_text_simple(
         model=model,
+        tokenizer=tokenizer,
         idx=encoded_tensor,
         max_new_tokens=10,
-        context_size=GPT_CONFIG_124M["context_length"]
+        context_size=GPT_CONFIG_124M["context_length"],
+        device=device,
+        temperature=0,
+        topk=None
     )
     decoded_text = tokenizer.decode(out.squeeze(0).tolist())
 
     print(f"\n\n{50*'='}\n{22*' '}OUT\n{50*'='}")
     print("\nOutput:", out)
     print("Output length:", len(out[0]))
-    print("Output text:", decoded_text)
+    print("Output text:", decoded_text.replace("\n",""))
 
 
 if __name__ == "__main__":

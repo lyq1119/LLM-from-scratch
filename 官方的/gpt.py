@@ -236,7 +236,7 @@ def generate_text_simple(model, idx, max_new_tokens, context_size):
 def main():
     GPT_CONFIG_124M = {
         "vocab_size": 50257,     # Vocabulary size
-        "context_length": 1024,  # Context length
+        "context_length": 256,  # Context length
         "emb_dim": 768,          # Embedding dimension
         "n_heads": 12,           # Number of attention heads
         "n_layers": 12,          # Number of layers
@@ -244,11 +244,11 @@ def main():
         "qkv_bias": False        # Query-Key-Value bias
     }
 
-    torch.manual_seed(123)
     model = GPTModel(GPT_CONFIG_124M)
+    model.load_state_dict(torch.load("model.pth", weights_only=True))
     model.eval()  # disable dropout
 
-    start_context = "Hello, I am Lan Yuqi."
+    start_context = "Every effort moves you"
 
     tokenizer = tiktoken.get_encoding("gpt2")
     encoded = tokenizer.encode(start_context)
